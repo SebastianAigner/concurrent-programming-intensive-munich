@@ -4,6 +4,9 @@ package day1
 
 import day1.Bank.Companion.MAX_AMOUNT
 import java.util.concurrent.locks.*
+import kotlin.concurrent.withLock
+import kotlin.math.max
+import kotlin.math.min
 
 class FineGrainedBank(accountsNumber: Int) : Bank {
     private val accounts: Array<Account> = Array(accountsNumber) { Account() }
@@ -11,37 +14,56 @@ class FineGrainedBank(accountsNumber: Int) : Bank {
     override fun getAmount(id: Int): Long {
         // TODO: Make this operation thread-safe via fine-grained locking.
         val account = accounts[id]
-        return account.amount
+        account.lock.withLock {
+            return account.amount
+        }
     }
 
     override fun deposit(id: Int, amount: Long): Long {
         // TODO: Make this operation thread-safe via fine-grained locking.
         require(amount > 0) { "Invalid amount: $amount" }
         val account = accounts[id]
-        check(!(amount > MAX_AMOUNT || account.amount + amount > MAX_AMOUNT)) { "Overflow" }
-        account.amount += amount
-        return account.amount
+        account.lock.withLock {
+            check(!(amount > MAX_AMOUNT || account.amount + amount > MAX_AMOUNT)) { "Overflow" }
+            account.amount += amount
+            return account.amount
+        }
     }
 
     override fun withdraw(id: Int, amount: Long): Long {
         // TODO: Make this operation thread-safe via fine-grained locking.
         require(amount > 0) { "Invalid amount: $amount" }
         val account = accounts[id]
-        check(account.amount - amount >= 0) { "Underflow" }
-        account.amount -= amount
-        return account.amount
+        account.lock.withLock {
+            check(account.amount - amount >= 0) { "Underflow" }
+            account.amount -= amount
+            return account.amount
+        }
     }
 
+    // val lockAquisitionLock = ReentrantLock()
+    // BUT: any transaction would have to acquire this "global" lock.
+    // that would be a bottleneck.
     override fun transfer(fromId: Int, toId: Int, amount: Long) {
         // TODO: Make this operation thread-safe via fine-grained locking.
         require(amount > 0) { "Invalid amount: $amount" }
         require(fromId != toId) { "fromId == toId" }
         val from = accounts[fromId]
         val to = accounts[toId]
-        check(amount <= from.amount) { "Underflow" }
-        check(!(amount > MAX_AMOUNT || to.amount + amount > MAX_AMOUNT)) { "Overflow" }
-        from.amount -= amount
-        to.amount += amount
+        // We "sort" the account IDs, to make sure we always acquire the locks in the same order.
+        // This prevents a deadlock where:
+        // T1.lock(A), T2.lock(B), T2.lock(B) *bang*
+
+        val lowerAccountId = min(fromId, toId)
+        val higherAccountId = max(fromId, toId)
+        accounts[lowerAccountId].lock.withLock {
+            accounts[higherAccountId].lock.withLock {
+                check(amount <= from.amount) { "Underflow" }
+                check(!(amount > MAX_AMOUNT || to.amount + amount > MAX_AMOUNT)) { "Overflow" }
+                from.amount -= amount
+                to.amount += amount
+            }
+        }
     }
 
     /**
