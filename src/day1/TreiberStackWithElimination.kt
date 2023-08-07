@@ -16,9 +16,34 @@ open class TreiberStackWithElimination<E> : Stack<E> {
     }
 
     protected open fun tryPushElimination(element: E): Boolean {
-        TODO("Implement me!")
         // TODO: Choose a random cell in `eliminationArray`
+        val cellIndex = randomCellIndex()
+
         // TODO: and try to install the element there.
+        if (!eliminationArray.compareAndSet(cellIndex, CELL_STATE_EMPTY, element)) {
+            // the cell was taken by someone else.
+            return false
+        }
+
+        // value is installed
+        repeat(ELIMINATION_WAIT_CYCLES) {
+            if (eliminationArray.compareAndSet(cellIndex, CELL_STATE_RETRIEVED, CELL_STATE_EMPTY)) {
+                return true
+            }
+        }
+        // value was not taken
+        while (true) {
+            // value may be taken again
+            if (eliminationArray.compareAndSet(cellIndex, CELL_STATE_RETRIEVED, CELL_STATE_EMPTY)) {
+                return true
+            }
+
+            if (eliminationArray.compareAndSet(cellIndex, element, CELL_STATE_EMPTY)) {
+                return false
+            }
+        }
+
+
         // TODO: Wait `ELIMINATION_WAIT_CYCLES` loop cycles
         // TODO: in hope that a concurrent `pop()` grabs the
         // TODO: element. If so, clean the cell and finish,
@@ -29,7 +54,20 @@ open class TreiberStackWithElimination<E> : Stack<E> {
     override fun pop(): E? = tryPopElimination() ?: stack.pop()
 
     private fun tryPopElimination(): E? {
-        TODO("Implement me!")
+        val cellIndex = randomCellIndex()
+        val item = eliminationArray.get(cellIndex)
+        if(item == null) return null
+        if(item == CELL_STATE_RETRIEVED) return null
+
+        // now we have an element
+        item as E
+
+        if(eliminationArray.compareAndSet(cellIndex, item, CELL_STATE_RETRIEVED)) {
+            return item
+        } else {
+            return null
+        }
+
         // TODO: Choose a random cell in `eliminationArray`
         // TODO: and try to retrieve an element from there.
         // TODO: On success, return the element.
