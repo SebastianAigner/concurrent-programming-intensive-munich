@@ -16,7 +16,7 @@ class FAABasedQueueSimplified<E> : Queue<E> {
             val i = enqIdx.getAndIncrement()
             // TODO: Atomically install the element into the cell
             // TODO: if the cell is not poisoned.
-            if(infiniteArray.compareAndSet(i.toInt(), null, element)) {
+            if (infiniteArray.compareAndSet(i.toInt(), null, element)) {
                 // inserted properly
                 return
             }
@@ -26,31 +26,60 @@ class FAABasedQueueSimplified<E> : Queue<E> {
     var deqInvoq = 0
 
     @Suppress("UNCHECKED_CAST")
+
+    // *********
+    // My initial implementation: Opportunistically attempts to read from the Array,
+    // if it's non-null, everything is great.
+    // Otherwise, things may have happened before
+    // *********
+//    override fun dequeue(): E? {
+//        while(true) {
+//            // Is this queue empty?
+//            if (deqIdx.get() >= enqIdx.get()) return null
+//            // TODO: Increment the counter atomically via Fetch-and-Add.
+//            // TODO: Use `getAndIncrement()` function for that.
+//            val i = deqIdx.getAndIncrement()
+//            // TODO: Try to retrieve an element if the cell contains an
+//            // TODO: element, poisoning the cell if it is empty.
+//            val retVal = infiniteArray.get(i.toInt())
+//            if (retVal == null) {
+//                if (infiniteArray.compareAndSet(i.toInt(), null, POISONED)) {
+//                    // the poisoning succeeded: we need to restart
+//                    continue
+//                } else {
+//                    // we read a null, but a value was written in the meantime
+//                    // "the poisoning failed"
+//                    // that means we do have a value tho
+//                    val lateRetVal = infiniteArray.get(i.toInt())
+//                    infiniteArray.set(i.toInt(), null)
+//                    return lateRetVal as E
+//                }
+//            }
+//            infiniteArray.set(i.toInt(), null)
+//            return retVal as E
+//        }
+//    }
+
     override fun dequeue(): E? {
-        // Is this queue empty?
-        while(true) {
+        while (true) {
+            // Is this queue empty?
             if (deqIdx.get() >= enqIdx.get()) return null
             // TODO: Increment the counter atomically via Fetch-and-Add.
             // TODO: Use `getAndIncrement()` function for that.
             val i = deqIdx.getAndIncrement()
             // TODO: Try to retrieve an element if the cell contains an
             // TODO: element, poisoning the cell if it is empty.
-
-            val retVal = infiniteArray.get(i.toInt())
-            if (retVal == null) {
-                if (!infiniteArray.compareAndSet(i.toInt(), null, POISONED)) {
-                    // we read a null, but a value was written in the meantime
-                    // "the poisoning failed"
-                    val lateRetVal = infiniteArray.get(i.toInt())
-                    infiniteArray.set(i.toInt(), null)
-                    return lateRetVal as E
-                } else {
-                    // the poisoning succeeded: we need to restart
-                    continue
-                }
+            val isPoisoned = infiniteArray.compareAndSet(i.toInt(), null, POISONED)
+            if (isPoisoned) {
+                continue
+            } else {
+                // we read a null, but a value was written in the meantime
+                // "the poisoning failed"
+                // that means we do have a value tho
+                val retval = infiniteArray.get(i.toInt())
+                infiniteArray.set(i.toInt(), null)
+                return retval as E
             }
-            infiniteArray.set(i.toInt(), null)
-            return retVal as E
         }
     }
 
