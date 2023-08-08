@@ -10,26 +10,48 @@ class FAABasedQueueSimplified<E> : Queue<E> {
     private val deqIdx = AtomicLong(0)
 
     override fun enqueue(element: E) {
-        // TODO: Increment the counter atomically via Fetch-and-Add.
-        // TODO: Use `getAndIncrement()` function for that.
-        val i = enqIdx.get()
-        enqIdx.set(i + 1)
-        // TODO: Atomically install the element into the cell
-        // TODO: if the cell is not poisoned.
-        infiniteArray.set(i.toInt(), element)
+        while (true) {
+            // TODO: Increment the counter atomically via Fetch-and-Add.
+            // TODO: Use `getAndIncrement()` function for that.
+            val i = enqIdx.getAndIncrement()
+            // TODO: Atomically install the element into the cell
+            // TODO: if the cell is not poisoned.
+            if(infiniteArray.compareAndSet(i.toInt(), null, element)) {
+                // inserted properly
+                return
+            }
+        }
     }
+
+    var deqInvoq = 0
 
     @Suppress("UNCHECKED_CAST")
     override fun dequeue(): E? {
         // Is this queue empty?
-        if (enqIdx.get() <= deqIdx.get()) return null
-        // TODO: Increment the counter atomically via Fetch-and-Add.
-        // TODO: Use `getAndIncrement()` function for that.
-        val i = deqIdx.get()
-        deqIdx.set(i + 1)
-        // TODO: Try to retrieve an element if the cell contains an
-        // TODO: element, poisoning the cell if it is empty.
-        return infiniteArray.get(i.toInt()) as E
+        while(true) {
+            if (deqIdx.get() >= enqIdx.get()) return null
+            // TODO: Increment the counter atomically via Fetch-and-Add.
+            // TODO: Use `getAndIncrement()` function for that.
+            val i = deqIdx.getAndIncrement()
+            // TODO: Try to retrieve an element if the cell contains an
+            // TODO: element, poisoning the cell if it is empty.
+
+            val retVal = infiniteArray.get(i.toInt())
+            if (retVal == null) {
+                if (!infiniteArray.compareAndSet(i.toInt(), null, POISONED)) {
+                    // we read a null, but a value was written in the meantime
+                    // "the poisoning failed"
+                    val lateRetVal = infiniteArray.get(i.toInt())
+                    infiniteArray.set(i.toInt(), null)
+                    return lateRetVal as E
+                } else {
+                    // the poisoning succeeded: we need to restart
+                    continue
+                }
+            }
+            infiniteArray.set(i.toInt(), null)
+            return retVal as E
+        }
     }
 
     override fun validate() {
