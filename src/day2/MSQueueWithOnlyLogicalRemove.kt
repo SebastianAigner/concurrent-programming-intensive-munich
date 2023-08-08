@@ -13,8 +13,20 @@ class MSQueueWithOnlyLogicalRemove<E> : QueueWithRemove<E> {
     }
 
     override fun enqueue(element: E) {
-        // TODO: Copy your implementation.
-        TODO("Implement me!")
+        while (true) {
+            val node = Node(element)
+            val currentTail = tail.get()
+            if (currentTail.next.compareAndSet(null, node)) {
+                // successfully added, need to move the tail
+                tail.compareAndSet(currentTail, node)
+                // ^ if this fails, we've been helped
+                return
+            } else {
+                // turns out currentTail.next was not NULL
+                // we 'help' by moving the tail one forward
+                tail.compareAndSet(currentTail, currentTail.next.get())
+            }
+        }
     }
 
     override fun dequeue(): E? {
@@ -24,7 +36,20 @@ class MSQueueWithOnlyLogicalRemove<E> : QueueWithRemove<E> {
         // TODO: mark the node that contains the extracting
         // TODO: element as "extracted or removed", restarting
         // TODO: the operation if this node has already been removed.
-        TODO("Implement me!")
+        while(true) {
+            val curHead = head.get() // dummy
+            val realNode = curHead.next.get() // real value
+            if(realNode == null) return null
+            if(head.compareAndSet(curHead, realNode)) {
+                if(realNode.markExtractedOrRemoved()) {
+                    // node was _JUST_ removed
+                    return realNode.element
+                } else {
+                    // node was removed previously
+                    continue
+                }
+            }
+        }
     }
 
     override fun remove(element: E): Boolean {
@@ -81,7 +106,7 @@ class MSQueueWithOnlyLogicalRemove<E> : QueueWithRemove<E> {
             // TODO: operation should return `true`.
             // TODO: Otherwise, the node is already either extracted or removed,
             // TODO: so the operation should return `false`.
-            TODO("Implement me!")
+            return markExtractedOrRemoved()
         }
     }
 }
