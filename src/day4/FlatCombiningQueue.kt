@@ -9,34 +9,156 @@ class FlatCombiningQueue<E> : Queue<E> {
     private val combinerLock = AtomicBoolean(false) // unlocked initially
     private val tasksForCombiner = AtomicReferenceArray<Any?>(TASKS_FOR_COMBINER_SIZE)
 
-    override fun enqueue(element: E) {
-        // TODO: Make this code thread-safe using the flat-combining technique.
-        // TODO: 1.  Try to become a combiner by
-        // TODO:     changing `combinerLock` from `false` (unlocked) to `true` (locked).
-        // TODO: 2a. On success, apply this operation and help others by traversing
-        // TODO:     `tasksForCombiner`, performing the announced operations, and
-        // TODO:      updating the corresponding cells to `Result`.
-        // TODO: 2b. If the lock is already acquired, announce this operation in
-        // TODO:     `tasksForCombiner` by replacing a random cell state from
-        // TODO:      `null` with the element. Wait until either the cell state
-        // TODO:      updates to `Result` (do not forget to clean it in this case),
-        // TODO:      or `combinerLock` becomes available to acquire.
-        queue.addLast(element)
+    private fun AtomicBoolean.tryLock(): Boolean {
+        return compareAndSet(false, true)
     }
 
-    override fun dequeue(): E? {
-        // TODO: Make this code thread-safe using the flat-combining technique.
-        // TODO: 1.  Try to become a combiner by
-        // TODO:     changing `combinerLock` from `false` (unlocked) to `true` (locked).
-        // TODO: 2a. On success, apply this operation and help others by traversing
-        // TODO:     `tasksForCombiner`, performing the announced operations, and
-        // TODO:      updating the corresponding cells to `Result`.
+    private fun AtomicBoolean.unlock() {
+        set(false)
+    }
+
+    private fun performCombinerTask(op: Any): Result<E?>? {
+        when (op) {
+            is Dequeue -> return performDequeue()
+            is Result<*> -> return null
+            else -> return performEnqueue(op)
+        }
+    }
+
+    private fun performEnqueue(op: Any): Result<E?> {
+        // Enqueue
+        queue.addLast(op as E)
+        return Result(op)
+    }
+
+    private fun performDequeue(): Result<E?> {
+        val elem = queue.removeFirstOrNull()
+        return Result(elem)
+    }
+
+    enum class Operation {
+        ENQUEUE,
+        DEQUEUE
+    }
+
+    private fun performOperation(operation: Operation, value: E?): Any? {
+        val isCombiner = combinerLock.tryLock()
+        if(isCombiner) {
+            val returnValue = when(operation) {
+                Operation.ENQUEUE -> {
+                    queue.addLast(value!!)
+                }
+                Operation.DEQUEUE -> {
+                    queue.removeFirstOrNull()
+                }
+            }
+            combinerLock.unlock()
+            return returnValue
+        }
+
+        // we couldn't obtain the lock
+
         // TODO: 2b. If the lock is already acquired, announce this operation in
         // TODO:     `tasksForCombiner` by replacing a random cell state from
-        // TODO:      `null` with `Dequeue`. Wait until either the cell state
-        // TODO:      updates to `Result` (do not forget to clean it in this case),
-        // TODO:      or `combinerLock` becomes available to acquire.
-        return queue.removeFirstOrNull()
+        // TODO:      `null` with the element.
+        val itemToPutInCell = when(operation) {
+            Operation.ENQUEUE -> value
+            Operation.DEQUEUE -> Dequeue
+        }
+        val cellIndex = putInRandomCell(itemToPutInCell!!)
+
+
+        while (true) {
+            val cellValue = tasksForCombiner.get(cellIndex)
+            if (cellValue is Result<*>) {
+                return when(operation) {
+                    Operation.ENQUEUE -> {
+                        // successful enqueue
+                        cleanCell(cellIndex)
+                        // we're done
+                    }
+                    Operation.DEQUEUE -> {
+                        val retVal = cellValue.value as E
+                        cleanCell(cellIndex)
+                        retVal
+                    }
+                }
+            }
+            // TODO: or `combinerLock` becomes available to acquire.
+            val gotLock = combinerLock.tryLock()
+            if (gotLock) {
+                val cellValue = tasksForCombiner.get(cellIndex)
+                if (cellValue is Result<*>) {
+                    return when(operation) {
+                        Operation.ENQUEUE -> {
+                            // successful enqueue
+                            cleanCell(cellIndex)
+                            // we're done
+                            combinerLock.unlock()
+                        }
+                        Operation.DEQUEUE -> {
+                            val retVal = cellValue.value as E
+                            cleanCell(cellIndex)
+                            combinerLock.unlock()
+                            retVal
+                        }
+                    }
+                }
+                cleanCell(cellIndex)
+                // TODO: 2a. On success, apply this operation
+                val retVal = when(operation) {
+                    Operation.ENQUEUE -> {
+                        queue.add(value!!)
+                    }
+                    Operation.DEQUEUE -> {
+                        val retVal = queue.removeFirstOrNull()
+                        retVal
+                    }
+                }
+                // TODO: and help others by traversing
+                // TODO:     `tasksForCombiner`, performing the announced operations, and
+                // TODO:      updating the corresponding cells to `Result`.
+                performAllCombinerTasks()
+                combinerLock.unlock()
+                return retVal
+            }
+        }
+    }
+
+    override fun enqueue(element: E) {
+        performOperation(Operation.ENQUEUE, element)
+    }
+
+    fun performAllCombinerTasks() {
+        // TODO: and help others by traversing
+        // TODO:     `tasksForCombiner`, performing the announced operations, and
+        // TODO:      updating the corresponding cells to `Result`.
+        repeat(TASKS_FOR_COMBINER_SIZE) { index ->
+            val task = tasksForCombiner[index]
+            if (task != null) {
+                val value = performCombinerTask(task)
+                if(value != null) {
+                    tasksForCombiner[index] = value
+                }
+            }
+        }
+    }
+
+
+    override fun dequeue(): E? {
+        return performOperation(Operation.DEQUEUE, null) as E?
+    }
+
+    private fun cleanCell(index: Int) {
+        tasksForCombiner.set(index, null)
+    }
+
+    private fun putInRandomCell(element: Any): Int {
+        while (true) {
+            val cellIndex = randomCellIndex()
+            val hasAdded = tasksForCombiner.compareAndSet(cellIndex, null, element)
+            if (hasAdded) return cellIndex
+        }
     }
 
     private fun randomCellIndex(): Int =

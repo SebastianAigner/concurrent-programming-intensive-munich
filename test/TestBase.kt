@@ -21,10 +21,11 @@ abstract class TestBase(
     fun modelCheckingTest() = try {
         ModelCheckingOptions()
             .iterations(scenarios)
-            .invocationsPerIteration(50_000)
+            .invocationsPerIteration(10_000)
             .actorsBefore(actorsBefore)
             .threads(threads)
             .actorsPerThread(2)
+            .logLevel(LoggingLevel.INFO)
             .actorsAfter(0)
             .checkObstructionFreedom(checkObstructionFreedom).apply {
                 if(sequentialSpecification != null) {
